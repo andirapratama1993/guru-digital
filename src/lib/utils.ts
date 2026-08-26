@@ -8,6 +8,12 @@ export function cn(...inputs: ClassValue[]) {
 
 export const TINGKAT_SEKOLAH: TingkatSekolah[] = ['SD', 'SMP', 'SMA']
 
+export const KELAS_BY_TINGKAT: Record<TingkatSekolah, number[]> = {
+  SD:  [1, 2, 3, 4, 5, 6],
+  SMP: [7, 8, 9],
+  SMA: [10, 11, 12],
+}
+
 export const MATA_PELAJARAN_BY_TINGKAT: Record<TingkatSekolah, MataPelajaran[]> = {
   SD: [
     'Matematika',

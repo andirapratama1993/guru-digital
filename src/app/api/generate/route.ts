@@ -2,25 +2,24 @@ import { createClient } from '@/lib/supabase/server'
 import { NextRequest, NextResponse } from 'next/server'
 import type { GenerateSoalRequest, SoalItem, HasilSoal } from '@/types'
 import { BENTUK_SOAL_LABELS } from '@/lib/utils'
+import { buildCrossword } from '@/lib/crossword'
 
 async function generateWithOpenAI(apiKey: string, prompt: string): Promise<string> {
   const OpenAI = (await import('openai')).default
   const client = new OpenAI({ apiKey })
-
   const completion = await client.chat.completions.create({
     model: 'gpt-4o-mini',
     messages: [
       {
         role: 'system',
-        content: 'Kamu adalah asisten guru profesional Indonesia. Buat soal berkualitas tinggi dalam format JSON yang valid. Selalu response dengan JSON object sesuai format yang diminta. PENTING: untuk teka_teki_silang, kotak harus berupa array 2D yang valid dengan objek {huruf, blocked, nomor}.'
+        content: 'Kamu adalah asisten guru profesional Indonesia. Buat soal berkualitas tinggi dalam format JSON yang valid. Response HANYA berupa JSON object, tidak ada teks lain.',
       },
-      { role: 'user', content: prompt }
+      { role: 'user', content: prompt },
     ],
     temperature: 0.7,
     max_tokens: 6000,
     response_format: { type: 'json_object' },
   })
-
   return completion.choices[0].message.content || '{}'
 }
 
@@ -31,7 +30,6 @@ async function generateWithGemini(apiKey: string, prompt: string): Promise<strin
     model: 'gemini-1.5-flash',
     generationConfig: { responseMimeType: 'application/json' },
   })
-
   const result = await model.generateContent(prompt)
   return result.response.text()
 }
@@ -43,6 +41,7 @@ function buildPrompt(req: GenerateSoalRequest & { kelas: number }): string {
 
   const hasMenjodohkan = req.bentukSoalList.some(b => b.bentuk === 'menjodohkan')
   const hasTTS = req.bentukSoalList.some(b => b.bentuk === 'teka_teki_silang')
+  const totalSoal = req.bentukSoalList.reduce((sum, b) => sum + b.jumlah, 0)
 
   return `Buat soal ujian untuk siswa ${req.tingkatSekolah} Kelas ${req.kelas} mata pelajaran ${req.mataPelajaran}.
 
@@ -52,162 +51,133 @@ Materi: ${req.materi}
 Bentuk soal yang dibutuhkan:
 ${bentukList}
 
-Buat soal dalam format JSON berikut (response hanya JSON, tidak ada teks lain):
+Format JSON yang WAJIB diikuti:
 {
   "soalList": [
     {
       "nomor": 1,
       "bentuk": "pilihan_ganda",
-      "pertanyaan": "...",
+      "pertanyaan": "teks pertanyaan lengkap",
       "opsi": ["teks opsi A", "teks opsi B", "teks opsi C", "teks opsi D"],
       "jawaban": "teks opsi A"
     },
     {
       "nomor": 2,
       "bentuk": "esai",
-      "pertanyaan": "...",
-      "jawaban": "Jawaban lengkap dan detail..."
+      "pertanyaan": "teks pertanyaan",
+      "jawaban": "jawaban lengkap dan detail"
     },
     {
       "nomor": 3,
       "bentuk": "isian_singkat",
-      "pertanyaan": "... adalah ...",
+      "pertanyaan": "teks pertanyaan dengan titik-titik: ...",
       "jawaban": "jawaban singkat"
-    },
-    ${hasMenjodohkan ? `{
+    }${hasMenjodohkan ? `,
+    {
       "nomor": 4,
       "bentuk": "menjodohkan",
       "pertanyaan": "Jodohkan pernyataan di Kolom A dengan jawaban yang tepat di Kolom B!",
-      "opsi": ["item Kolom A 1", "item Kolom A 2", "item Kolom A 3", "item Kolom A 4", "item Kolom A 5"],
-      "pasangan": ["item Kolom B 1", "item Kolom B 2", "item Kolom B 3", "item Kolom B 4", "item Kolom B 5"],
+      "opsi": ["Kolom A item 1", "Kolom A item 2", "Kolom A item 3", "Kolom A item 4", "Kolom A item 5"],
+      "pasangan": ["Kolom B item 1", "Kolom B item 2", "Kolom B item 3", "Kolom B item 4", "Kolom B item 5"],
       "jawaban": "1-A, 2-B, 3-C, 4-D, 5-E"
-    },` : ''}
+    }` : ''},
     {
       "nomor": 5,
       "bentuk": "benar_salah",
-      "pertanyaan": "Pernyataan yang harus dinilai benar atau salah...",
+      "pertanyaan": "pernyataan yang harus dinilai benar atau salah",
       "jawaban": true
     }${hasTTS ? `,
     {
       "nomor": 6,
       "bentuk": "teka_teki_silang",
       "pertanyaan": "Isi teka-teki silang berikut berdasarkan petunjuk yang tersedia!",
-      "kotak": [
-        [{"huruf":"","blocked":false,"nomor":1},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":false,"nomor":2},{"huruf":"","blocked":false},{"huruf":"","blocked":false}],
-        [{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true},{"huruf":"","blocked":true},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true}],
-        [{"huruf":"","blocked":false,"nomor":3},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false}],
-        [{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true},{"huruf":"","blocked":true},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true}],
-        [{"huruf":"","blocked":false,"nomor":4},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false}],
-        [{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true},{"huruf":"","blocked":false},{"huruf":"","blocked":true},{"huruf":"","blocked":true}],
-        [{"huruf":"","blocked":false,"nomor":5},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false},{"huruf":"","blocked":false}]
-      ],
+      "kata": ["KATA1", "KATA2", "KATA3", "KATA4", "KATA5", "KATA6", "KATA7"],
       "petunjukMendatar": [
-        {"nomor": 1, "pertanyaan": "Petunjuk mendatar nomor 1 berkaitan dengan materi..."},
-        {"nomor": 3, "pertanyaan": "Petunjuk mendatar nomor 3 berkaitan dengan materi..."},
-        {"nomor": 4, "pertanyaan": "Petunjuk mendatar nomor 4 berkaitan dengan materi..."},
-        {"nomor": 5, "pertanyaan": "Petunjuk mendatar nomor 5 berkaitan dengan materi..."}
+        {"nomor": 1, "pertanyaan": "petunjuk mendatar relevan dengan materi"},
+        {"nomor": 3, "pertanyaan": "petunjuk mendatar relevan dengan materi"}
       ],
       "petunjukMenurun": [
-        {"nomor": 1, "pertanyaan": "Petunjuk menurun nomor 1 berkaitan dengan materi..."},
-        {"nomor": 2, "pertanyaan": "Petunjuk menurun nomor 2 berkaitan dengan materi..."},
-        {"nomor": 4, "pertanyaan": "Petunjuk menurun nomor 4 berkaitan dengan materi..."}
+        {"nomor": 1, "pertanyaan": "petunjuk menurun relevan dengan materi"},
+        {"nomor": 2, "pertanyaan": "petunjuk menurun relevan dengan materi"}
       ],
-      "kata": ["KATA1", "KATA2", "KATA3", "KATA4", "KATA5"],
       "jawaban": "Lihat kunci jawaban TTS"
     }` : ''}
   ]
 }
 
 ATURAN WAJIB:
-1. Nomor soal berurutan dari 1 sampai total soal
-2. Tingkat kesulitan HARUS sesuai: ${req.tingkatKesulitan}
-3. Bahasa Indonesia yang baik dan benar, sesuai level ${req.tingkatSekolah} Kelas ${req.kelas}
-4. Pilihan ganda: SELALU 4 opsi, isi opsi dengan teks lengkap bukan hanya huruf
-5. Benar/salah: jawaban berupa boolean true atau false
-${hasMenjodohkan ? `6. MENJODOHKAN: WAJIB minimal 5 pasangan di opsi dan pasangan. Opsi = Kolom A, Pasangan = Kolom B. Isi dengan konten nyata yang relevan dengan materi, bukan placeholder.` : ''}
-${hasTTS ? `7. TEKA-TEKI SILANG: kotak harus array 2D valid. Setiap sel adalah objek {huruf: string, blocked: boolean, nomor?: number}. Sel blocked=true adalah kotak hitam. Nomor muncul di sel awal kata. Isi petunjukMendatar dan petunjukMenurun dengan pertanyaan tentang materi. Kata-kata harus relevan dengan materi pelajaran.` : ''}
-- Total soal: ${req.bentukSoalList.reduce((sum, b) => sum + b.jumlah, 0)} soal`
+1. Nomor soal berurutan dari 1 sampai ${totalSoal}
+2. Tingkat kesulitan HARUS sesuai: ${req.tingkatKesulitan} (${req.tingkatSekolah} Kelas ${req.kelas})
+3. Bahasa Indonesia yang baik dan benar
+4. Pilihan ganda: SELALU 4 opsi berisi teks lengkap, bukan hanya huruf A/B/C/D
+5. Benar/salah: jawaban berupa boolean true atau false (bukan string)
+${hasMenjodohkan ? '6. MENJODOHKAN: WAJIB tepat 5 item di opsi (Kolom A) dan 5 item di pasangan (Kolom B). Isi dengan konten nyata relevan materi.' : ''}
+${hasTTS ? '7. TEKA-TEKI SILANG: berikan 6-8 kata (huruf kapital, tanpa spasi, hanya A-Z) yang relevan dengan materi. JANGAN sertakan field "kotak" - sistem akan membangun grid otomatis. Pastikan petunjukMendatar dan petunjukMenurun sesuai jumlah kata.' : ''}`
 }
 
-function buildTTSGrid(size = 9): import('@/types').TTSCell[][] {
-  // Fallback grid jika AI tidak menghasilkan grid yang valid
-  const grid: import('@/types').TTSCell[][] = []
-  for (let r = 0; r < 7; r++) {
-    const row: import('@/types').TTSCell[] = []
-    for (let c = 0; c < size; c++) {
-      const blocked = (r % 2 === 1) && (c % 2 === 1)
-      row.push({
-        huruf: '',
-        blocked,
-        nomor: (!blocked && r === 0 && c === 0) ? 1 : undefined,
-      })
-    }
-    grid.push(row)
-  }
-  return grid
-}
-
-function normalizeTTSGrid(raw: unknown): import('@/types').TTSCell[][] {
-  if (!Array.isArray(raw) || raw.length === 0) return buildTTSGrid()
-
-  try {
-    const grid: import('@/types').TTSCell[][] = (raw as unknown[][]).map(row => {
-      if (!Array.isArray(row)) return []
-      return (row as Record<string, unknown>[]).map(cell => ({
-        huruf: typeof cell?.huruf === 'string' ? cell.huruf : '',
-        blocked: typeof cell?.blocked === 'boolean' ? cell.blocked : false,
-        nomor: typeof cell?.nomor === 'number' ? cell.nomor : undefined,
-      }))
-    })
-    // Validate dimensions
-    if (grid.length < 3 || grid[0].length < 3) return buildTTSGrid()
-    return grid
-  } catch {
-    return buildTTSGrid()
-  }
-}
-
-function parseAndValidateSoal(raw: string, req: GenerateSoalRequest & { kelas: number }): SoalItem[] {
-  let parsed
+function parseAndValidateSoal(
+  raw: string,
+  req: GenerateSoalRequest & { kelas: number }
+): SoalItem[] {
+  let parsed: Record<string, unknown>
   try {
     parsed = JSON.parse(raw)
   } catch {
     const match = raw.match(/\{[\s\S]*\}/)
     if (match) {
-      try { parsed = JSON.parse(match[0]) } catch { throw new Error('Format JSON tidak valid') }
+      try { parsed = JSON.parse(match[0]) }
+      catch { throw new Error('Format JSON tidak valid dari AI') }
     } else {
-      throw new Error('Format JSON tidak valid')
+      throw new Error('Format JSON tidak valid dari AI')
     }
   }
 
-  const soalList: unknown[] = parsed.soalList || parsed.soal || []
-
-  if (!Array.isArray(soalList)) throw new Error('Format soal tidak valid')
+  const rawList: unknown[] = (parsed.soalList || parsed.soal || []) as unknown[]
+  if (!Array.isArray(rawList)) throw new Error('Format soal tidak valid')
 
   let nomor = 1
   const validated: SoalItem[] = []
 
-  for (const s of soalList as Record<string, unknown>[]) {
+  for (const s of rawList as Record<string, unknown>[]) {
     const bentuk = String(s.bentuk || 'esai') as SoalItem['bentuk']
 
-    // Handle TTS grid normalization
-    const kotak = bentuk === 'teka_teki_silang'
-      ? normalizeTTSGrid(s.kotak)
-      : undefined
-
-    // Ensure menjodohkan has at least 5 pairs
-    let opsi = Array.isArray(s.opsi) ? s.opsi as string[] : undefined
-    let pasangan = Array.isArray(s.pasangan) ? s.pasangan as string[] : undefined
+    // Menjodohkan: ensure min 5 pairs
+    let opsi = Array.isArray(s.opsi) ? (s.opsi as string[]) : undefined
+    let pasangan = Array.isArray(s.pasangan) ? (s.pasangan as string[]) : undefined
 
     if (bentuk === 'menjodohkan') {
-      if (!opsi || opsi.length < 5) {
-        opsi = opsi || []
-        while (opsi.length < 5) opsi.push(`Item ${opsi.length + 1}`)
-      }
-      if (!pasangan || pasangan.length < 5) {
-        pasangan = pasangan || []
-        while (pasangan.length < 5) pasangan.push(`Pasangan ${pasangan.length + 1}`)
-      }
+      opsi = opsi || []
+      pasangan = pasangan || []
+      while (opsi.length < 5) opsi.push(`Item ${opsi.length + 1}`)
+      while (pasangan.length < 5) pasangan.push(`Pasangan ${pasangan.length + 1}`)
+    }
+
+    // TTS: build proper crossword grid from kata list using algorithm
+    let kotak: SoalItem['kotak'] = undefined
+    let petunjukMendatar = Array.isArray(s.petunjukMendatar)
+      ? (s.petunjukMendatar as { nomor: number; pertanyaan: string }[])
+      : []
+    let petunjukMenurun = Array.isArray(s.petunjukMenurun)
+      ? (s.petunjukMenurun as { nomor: number; pertanyaan: string }[])
+      : []
+
+    if (bentuk === 'teka_teki_silang') {
+      const kata = Array.isArray(s.kata)
+        ? (s.kata as string[]).map(k => String(k).toUpperCase().replace(/[^A-Z]/g, '')).filter(k => k.length >= 3)
+        : []
+
+      // Build clues array (across first, then down)
+      const allClues = [
+        ...petunjukMendatar.map(p => p.pertanyaan),
+        ...petunjukMenurun.map(p => p.pertanyaan),
+      ]
+
+      const crossword = buildCrossword(kata, allClues)
+      kotak = crossword.grid
+
+      // Re-assign clues from crossword builder output
+      petunjukMendatar = crossword.across
+      petunjukMenurun = crossword.down
     }
 
     validated.push({
@@ -218,13 +188,11 @@ function parseAndValidateSoal(raw: string, req: GenerateSoalRequest & { kelas: n
       jawaban: (s.jawaban !== undefined && s.jawaban !== null ? s.jawaban : '') as string | boolean,
       pasangan,
       kotak,
-      petunjukMendatar: bentuk === 'teka_teki_silang'
-        ? (Array.isArray(s.petunjukMendatar) ? s.petunjukMendatar as { nomor: number; pertanyaan: string }[] : [])
+      petunjukMendatar: bentuk === 'teka_teki_silang' ? petunjukMendatar : undefined,
+      petunjukMenurun: bentuk === 'teka_teki_silang' ? petunjukMenurun : undefined,
+      kata: bentuk === 'teka_teki_silang'
+        ? (Array.isArray(s.kata) ? (s.kata as string[]).map(k => String(k).toUpperCase()) : [])
         : undefined,
-      petunjukMenurun: bentuk === 'teka_teki_silang'
-        ? (Array.isArray(s.petunjukMenurun) ? s.petunjukMenurun as { nomor: number; pertanyaan: string }[] : [])
-        : undefined,
-      kata: Array.isArray(s.kata) ? s.kata as string[] : undefined,
     })
   }
 
@@ -254,6 +222,7 @@ export async function POST(request: NextRequest) {
 
     const userOpenAIKey = profile?.openai_api_key
     const userGeminiKey = profile?.gemini_api_key
+    // Default: prioritize OpenAI
     const defaultOpenAIKey = process.env.DEFAULT_OPENAI_API_KEY
     const defaultGeminiKey = process.env.DEFAULT_GEMINI_API_KEY
 
@@ -266,13 +235,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const req = {
-      ...body,
-      materi: materiFull,
-      userId: user.id,
-      kelas: body.kelas || 7,
-    }
-
+    const req = { ...body, materi: materiFull, userId: user.id, kelas: body.kelas || 7 }
     const prompt = buildPrompt(req)
     let rawResult: string
     let aiAgentUsed: string
@@ -290,7 +253,7 @@ export async function POST(request: NextRequest) {
       rawResult = await generateWithGemini(key, prompt)
       aiAgentUsed = 'Gemini'
     } else {
-      // Default: try OpenAI first, fallback to Gemini
+      // Default: OpenAI first (prioritized), fallback Gemini
       const openaiKey = userOpenAIKey || defaultOpenAIKey
       const geminiKey = userGeminiKey || defaultGeminiKey
 
@@ -298,9 +261,9 @@ export async function POST(request: NextRequest) {
         try {
           rawResult = await generateWithOpenAI(openaiKey, prompt)
           aiAgentUsed = 'ChatGPT (Auto)'
-        } catch (openaiErr) {
-          console.warn('OpenAI failed, trying Gemini:', openaiErr)
-          if (!geminiKey) throw openaiErr
+        } catch (err) {
+          console.warn('OpenAI failed, trying Gemini:', err)
+          if (!geminiKey) throw err
           rawResult = await generateWithGemini(geminiKey, prompt)
           aiAgentUsed = 'Gemini (Auto-fallback)'
         }
@@ -309,13 +272,12 @@ export async function POST(request: NextRequest) {
         aiAgentUsed = 'Gemini (Auto)'
       } else {
         return NextResponse.json({
-          error: 'Tidak ada API Key tersedia. Tambahkan API Key di menu Profil atau hubungi administrator.'
+          error: 'Tidak ada API Key tersedia. Tambahkan API Key di menu Profil atau hubungi administrator.',
         }, { status: 400 })
       }
     }
 
     const soalList = parseAndValidateSoal(rawResult, req)
-    const totalSoal = soalList.length
 
     const hasil: HasilSoal = {
       userId: user.id,
@@ -342,7 +304,7 @@ export async function POST(request: NextRequest) {
         materi: hasil.materi,
         soal_list: hasil.soalList,
         ai_agent_used: hasil.aiAgentUsed,
-        total_soal: totalSoal,
+        total_soal: soalList.length,
       })
       .select('id')
       .single()

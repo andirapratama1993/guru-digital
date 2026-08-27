@@ -179,10 +179,10 @@ export async function POST(request: NextRequest) {
           y += 5
         }
 
-        // teka-teki silang – gambar grid
+        // teka-teki silang – gambar grid TANPA jawaban (soal kosong)
         if (bentuk === 'teka_teki_silang' && soal.kotak) {
           y += 2
-          drawTTSGrid(doc, soal.kotak, margin + 8, y, contentWidth - 16)
+          drawTTSGrid(doc, soal.kotak, margin + 8, y, contentWidth - 16, false)
           const cellMm = Math.min(7, (contentWidth - 16) / (soal.kotak[0]?.length || 10))
           y += soal.kotak.length * cellMm + 4
 
@@ -289,17 +289,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // TTS kunci jawaban
+    // TTS kunci jawaban – grid dengan huruf terisi + daftar kata
     const ttsSoals = hasil.soalList.filter(s => s.bentuk === 'teka_teki_silang')
     if (ttsSoals.length > 0) {
       sectionDivider('TEKA-TEKI SILANG – KUNCI JAWABAN')
       for (const soal of ttsSoals) {
+        checkBreak(12)
+        doc.setFontSize(9)
+        doc.setFont('helvetica', 'bold')
+        doc.setTextColor(30, 41, 59)
+        doc.text(`Soal ${soal.nomor}:`, margin + 5, y)
+        y += 5
+
+        // Grid dengan huruf jawaban terisi (showAnswers = true)
+        if (soal.kotak) {
+          drawTTSGrid(doc, soal.kotak, margin + 8, y, contentWidth - 16, true)
+          const cellMm = Math.min(7.5, (contentWidth - 16) / (soal.kotak[0]?.length || 10))
+          y += soal.kotak.length * cellMm + 4
+        }
+
+        // Daftar kata jawaban
         if (soal.kata && soal.kata.length > 0) {
           checkBreak(8)
-          doc.setFontSize(9)
-          doc.setFont('helvetica', 'normal')
-          doc.setTextColor(30, 41, 59)
-          const kataText = `Soal ${soal.nomor}: ${soal.kata.join(', ')}`
+          doc.setFontSize(8.5)
+          doc.setFont('helvetica', 'bold')
+          doc.setTextColor(22, 163, 74)
+          const kataText = `Kata-kata: ${soal.kata.join(', ')}`
           const kLines = doc.splitTextToSize(kataText, contentWidth - 10)
           doc.text(kLines, margin + 5, y)
           y += kLines.length * 5 + 3
@@ -328,7 +343,8 @@ function drawTTSGrid(
   kotak: TTSCell[][],
   startX: number,
   startY: number,
-  maxWidth: number
+  maxWidth: number,
+  showAnswers = false
 ) {
   const cols = kotak[0]?.length || 1
   const rows = kotak.length
@@ -357,8 +373,8 @@ function drawTTSGrid(
           doc.text(String(cell.nomor), x + 0.5, y + 3)
         }
 
-        // huruf kunci (jika ada) – tampilkan di kunci jawaban
-        if (cell.huruf) {
+        // huruf kunci – hanya tampil di kunci jawaban
+        if (showAnswers && cell.huruf) {
           doc.setFontSize(6.5)
           doc.setFont('helvetica', 'bold')
           doc.setTextColor(15, 23, 42)
